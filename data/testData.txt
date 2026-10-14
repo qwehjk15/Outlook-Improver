@@ -1,1 +1,2 @@
-
+sender sendTime sendDate subject body isUrgent isReply actionStatus
+bob@gmail.com 13:06:28 2026-05-05 thing "hello there" F F none
