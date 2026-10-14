@@ -1,17 +1,11 @@
-sender sendTime sendDate subject body isUrgent isReply actionStatus
-sender sendTime sendDate subject body isUrgent isReply actionStatus
-bob@gmail.com 13:06:28 2026-05-05 thing "hello there" F F none
-alice@yahoo.com 09:15:42 2026-05-06 meeting "Can we reschedule our meeting for tomorrow?" F T pending
-charlie@gmail.com 16:30:11 2026-05-07 project "The project report is ready for review." F F none
-david@gmail.com 08:45:03 2026-05-08 urgent "Please send the updated files immediately." T F pending
-emma@gmail.com 11:22:19 2026-05-09 lunch "Would you like to grab lunch today?" F F none
-frank@gmail.com 14:10:55 2026-05-10 invoice "Your invoice is attached for your records." F F archived
-grace@gmail.com 17:35:26 2026-05-11 question "Did you receive the documents I sent yesterday?" F T pending
-henry@gmail.com 07:50:14 2026-05-12 reminder "Reminder: the application deadline is tomorrow." T F pending
-isabella@gmail.com 12:05:37 2026-05-13 feedback "Thanks for your feedback on the presentation." F T archived
-jack@gmail.com 10:40:08 2026-05-14 invitation "You are invited to our annual team event." F F none
-karen@gmail.com 15:18:49 2026-05-15 update "The system maintenance has been completed." F F archived
-liam@gmail.com 18:25:32 2026-05-16 followup "Just checking whether you had time to review my proposal." F T pending
-mia@gmail.com 06:55:21 2026-05-17 security "Unusual login activity was detected on your account." T F pending
-noah@gmail.com 13:42:16 2026-05-18 travel "Your flight confirmation and itinerary are attached." F F archived
-olivia@gmail.com 09:30:44 2026-05-19 congratulations "Congratulations on completing the project successfully!" F F none
+sender,sendTime,sendDate,subject,body,isUrgent,isReply,actionStatus
+bob@gmail.com,13:06:28,2026-05-05,thing,"hello there",F,F,none
+alice@yahoo.com,09:15:42,2026-05-06,meeting,"Can we reschedule our meeting for tomorrow?",F,T,pending
+charlie@gmail.com,16:30:11,2026-05-07,project,"The project report is ready for review.",F,F,none
+david@gmail.com,08:45:03,2026-05-08,urgent,"Please send the updated files immediately.",T,F,pending
+emma@gmail.com,11:22:19,2026-05-09,lunch,"Would you like to grab lunch today?",F,F,none
+frank@gmail.com,14:10:55,2026-05-10,invoice,"Your invoice is attached for your records.",F,F,archived
+liam@gmail.com,18:25:32,2026-05-16,followup,"Just checking whether you had,time to review my proposal.",F,T,pending
+mia@gmail.com,06:55:21,2026-05-17,security,"Unusual login activity was detected on your account.",T,F,pending
+noah@gmail.com,13:42:16,2026-05-18,travel,"Your flight confirmation and itinerary are attached.",F,F,archived
+olivia@gmail.com,09:30:44,2026-05-19,congratulations,"Congratulations on completing the project successfully!",F,F,none
