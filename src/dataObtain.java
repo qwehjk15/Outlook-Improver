@@ -5,10 +5,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class dataObtain {
-    public List<String> (String) {
+    public List<String> dataObtain (String fileAddress) {
         List<String> data = new ArrayList<>();
 
-        try (BufferedReader br = new BufferedReader(new FileReader("testData.csv"))) {
+        try (BufferedReader br = new BufferedReader(new FileReader(fileAddress))) {
             String line;
 
             while ((line = br.readLine()) != null) {
