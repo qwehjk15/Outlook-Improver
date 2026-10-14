@@ -1,82 +1,55 @@
 
-import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public class Main {
 
-    enum Operation {
-        SORT, GROUP
-    }
-
     enum Category {
-        COURSEWORK,
-        LECTURES,
-        EXAMS,
-        UNIVERSITY_ADMIN,
-        SOCIETIES_EVENTS,
-        GENERAL
+        COURSEWORK, LECTURES, EXAMS,
+        UNIVERSITY_ADMIN, SOCIETIES_EVENTS, GENERAL
     }
 
     enum UpdateType {
-        NONE,
-        GENERAL_UPDATE,
-        DEADLINE_CHANGE,
-        GRADE_CHANGE,
-        LOCATION_CHANGE,
-        CANCELLATION
+        NONE, GENERAL_UPDATE, DEADLINE_CHANGE,
+        GRADE_CHANGE, LOCATION_CHANGE, CANCELLATION
     }
 
     enum Field {
-        CATEGORY,
-        DUE_DATE,
-        GRADED,
-        POINTS,
-        MODULE,
-        MESSAGE_SCORE,
-        SENT_DATE,
-        SENDER,
-        PLATFORM,
-        URGENCY,
-        IS_REPLY,
-        IS_UPDATE,
-        UPDATE_TYPE,
-        ACTION_STATUS
+        CATEGORY, IMPORTANCE, SENT_DATE, UPDATE_FIRST
     }
 
-    static final DateTimeFormatter DATE_FORMAT =
-        DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm");
+    enum Operation {
+        GROUP, SORT
+    }
+
+    static final LocalDateTime NOW =
+        LocalDateTime.of(2026, 10, 14, 12, 0);
+
+    static final DateTimeFormatter DATE =
+        DateTimeFormatter.ofPattern("dd MMM, HH:mm");
 
     static class Email {
-        String id;
-        String sender;
-        String platform;
-        String subject;
-        String body;
-
-        LocalDateTime sentDate;
-        LocalDateTime dueDate;
-
+        String id, sender, platform, subject, body;
+        String module, actionStatus, relatedId;
+        LocalDateTime sentDate, dueDate;
         Category category;
-        UpdateType updateType;
+        UpdateType updateType = UpdateType.NONE;
 
-        Boolean isUrgent;
-        Boolean isReply;
-        Boolean graded;
-        Boolean isUpdate;
+        boolean isReply = false;
+        boolean isUpdate = false;
+        boolean manuallyUrgent = false;
+        boolean graded = false;
+        boolean reviewed = false;
 
-        Integer points;
-        String module;
-        String actionStatus;
-        String relatedMessageId;
-
-        int messageScore;
+        Integer points = null;
+        int score = 0;
+        String priorityLabel;
 
         Email(String id, String sender, String platform,
               String subject, String body,
-              LocalDateTime sentDate, Category category) {
-
+              LocalDateTime sentDate, Category category,
+              String module, String actionStatus) {
             this.id = id;
             this.sender = sender;
             this.platform = platform;
@@ -84,18 +57,8 @@ public class Main {
             this.body = body;
             this.sentDate = sentDate;
             this.category = category;
-
-            this.updateType = UpdateType.NONE;
-            this.isUrgent = false;
-            this.isReply = false;
-            this.isUpdate = false;
-            this.graded = null;
-            this.points = null;
-            this.dueDate = null;
-            this.module = "Not specified";
-            this.actionStatus = "Needs action";
-            this.relatedMessageId = null;
-            this.messageScore = 0;
+            this.module = module;
+            this.actionStatus = actionStatus;
         }
     }
 
@@ -104,401 +67,411 @@ public class Main {
         Operation operation;
         Field field;
         boolean ascending;
-        boolean enabled;
         int order;
 
-        Rule(String name, Operation operation, Field field,
-             boolean ascending, boolean enabled, int order) {
-
+        Rule(String name, Operation operation,
+             Field field, boolean ascending, int order) {
             this.name = name;
             this.operation = operation;
             this.field = field;
             this.ascending = ascending;
-            this.enabled = enabled;
             this.order = order;
         }
     }
 
-    // Calculate a transparent, rule-based importance score.
-    static int calculateScore(Email e, LocalDateTime now) {
-        int score = 0;
+    static String content(Email e) {
+        return (e.subject + " " + e.body).toLowerCase(Locale.ROOT);
+    }
 
-        if (Boolean.TRUE.equals(e.isUrgent)) score += 5;
-        if (Boolean.TRUE.equals(e.graded)) score += 3;
+    static boolean containsAny(String text, String... words) {
+        for (String word : words) {
+            if (text.contains(word)) return true;
+        }
+        return false;
+    }
+
+    // Detect likely urgency signals. This is a heuristic,
+    // not a guarantee that a message truly is urgent.
+    static boolean isUrgent(Email e) {
+        if (e.manuallyUrgent) return true;
+
+        if (e.updateType == UpdateType.DEADLINE_CHANGE
+                || e.updateType == UpdateType.GRADE_CHANGE
+                || e.updateType == UpdateType.CANCELLATION) {
+            return true;
+        }
 
         if (e.dueDate != null) {
-            long hours = Duration.between(now, e.dueDate).toHours();
+            long hours = Duration.between(NOW, e.dueDate).toHours();
+            if (hours >= 0 && hours <= 24) return true;
+        }
 
-            if (hours < 0) score += 5;
-            else if (hours <= 24) score += 5;
-            else if (hours <= 72) score += 3;
+        String text = content(e);
+        return containsAny(text,
+            "action required", "deadline changed",
+            "due tomorrow", "immediate action",
+            "cancelled", "canceled");
+    }
+
+    // Importance score: transparent, rule-based and capped at 20.
+    // Negative signals reduce importance but do not prove spam.
+    static int calculateScore(Email e) {
+        int score = 5; // Neutral starting point.
+        String text = content(e);
+
+        if (isUrgent(e)) score += 5;
+        if (e.dueDate != null) {
+            long hours = Duration.between(NOW, e.dueDate).toHours();
+
+            if (hours < 0) score += 2;
+            else if (hours <= 24) score += 4;
+            else if (hours <= 72) score += 2;
             else if (hours <= 168) score += 1;
         }
 
         if ("Needs action".equals(e.actionStatus)) score += 2;
+        if (e.graded) score += 3;
 
-        switch (e.updateType) {
-            case DEADLINE_CHANGE:
-            case GRADE_CHANGE:
-            case CANCELLATION:
-                score += 5;
-                break;
-            case LOCATION_CHANGE:
-                score += 3;
-                break;
-            case GENERAL_UPDATE:
-                score += 1;
-                break;
-            default:
-                break;
+        if (e.updateType != UpdateType.NONE) score += 2;
+
+        // Lower priority for likely optional or bulk messages.
+        if (containsAny(text,
+                "weekly newsletter", "optional social",
+                "just for fun", "no action needed")) {
+            score -= 3;
         }
 
-        return score;
+        if (containsAny(text,
+                "advertisement", "promotional offer",
+                "limited-time sale", "unsubscribe")) {
+            score -= 5;
+        }
+
+        if ("Informational".equals(e.actionStatus)) score -= 1;
+        if (e.reviewed) score -= 2;
+
+        return Math.max(0, Math.min(20, score));
+    }
+
+    static String priorityLabel(Email e) {
+        if (isUrgent(e)) return "URGENT";
+        if (e.score >= 12) return "HIGH PRIORITY";
+        if (e.score >= 8) return "NORMAL PRIORITY";
+        if (e.score >= 4) return "LOW PRIORITY";
+        return "LIKELY LOW VALUE";
+    }
+
+    static String statusLabel(Email e) {
+        if ("Needs action".equals(e.actionStatus)) {
+            return "ACTION REQUIRED";
+        }
+        if ("Review".equals(e.actionStatus)) {
+            return "REVIEW WHEN READY";
+        }
+        return "INFORMATION ONLY";
+    }
+
+    static String updateLabel(Email e) {
+        switch (e.updateType) {
+            case DEADLINE_CHANGE: return "Deadline changed";
+            case GRADE_CHANGE: return "Grade update";
+            case LOCATION_CHANGE: return "Location changed";
+            case CANCELLATION: return "Event cancelled";
+            case GENERAL_UPDATE: return "General update";
+            default:
+                return e.isReply ? "Reply (no update flagged)" : "Original message";
+        }
+    }
+
+    static Object value(Email e, Field field) {
+        switch (field) {
+            case CATEGORY: return e.category;
+            case IMPORTANCE: return e.score;
+            case SENT_DATE: return e.sentDate;
+            case UPDATE_FIRST: return e.isUpdate;
+            default: return null;
+        }
     }
 
     static void sortEmails(List<Email> emails, Rule rule) {
-        Comparator<Email> comparator = (a, b) -> {
-            Comparable<?> va = getValue(a, rule.field);
-            Comparable<?> vb = getValue(b, rule.field);
+        emails.sort((a, b) -> {
+            Object x = value(a, rule.field);
+            Object y = value(b, rule.field);
 
-            // Unknown values stay at the end, in either direction.
-            if (va == null && vb == null) return 0;
-            if (va == null) return 1;
-            if (vb == null) return -1;
+            int result;
+            if (x instanceof Comparable && y instanceof Comparable) {
+                result = ((Comparable) x).compareTo(y);
+            } else {
+                result = 0;
+            }
 
-            int result = compareValues(va, vb);
             return rule.ascending ? result : -result;
-        };
-
-        emails.sort(comparator);
+        });
     }
 
-    @SuppressWarnings("unchecked")
-    static int compareValues(Comparable<?> a, Comparable<?> b) {
-        return ((Comparable<Object>) a).compareTo(b);
-    }
-
-    static Comparable<?> getValue(Email e, Field field) {
-        switch (field) {
-            case CATEGORY:       return e.category;
-            case DUE_DATE:       return e.dueDate;
-            case GRADED:         return e.graded;
-            case POINTS:         return e.points;
-            case MODULE:         return e.module;
-            case MESSAGE_SCORE:  return e.messageScore;
-            case SENT_DATE:      return e.sentDate;
-            case SENDER:         return e.sender;
-            case PLATFORM:       return e.platform;
-            case URGENCY:        return e.isUrgent;
-            case IS_REPLY:       return e.isReply;
-            case IS_UPDATE:      return e.isUpdate;
-            case UPDATE_TYPE:    return e.updateType;
-            case ACTION_STATUS:  return e.actionStatus;
-            default:             return null;
-        }
-    }
-
-    // Group by the selected field, preserving first-seen group order.
     static List<List<Email>> groupEmails(
             List<Email> emails, Field field) {
+        Map<Object, List<Email>> groups = new LinkedHashMap<>();
 
-        Map<Object, List<Email>> grouped = new LinkedHashMap<>();
-
-        for (Email email : emails) {
-            Object key = getValue(email, field);
-
-            grouped.computeIfAbsent(
-                key, k -> new ArrayList<>()
-            ).add(email);
+        for (Email e : emails) {
+            groups.computeIfAbsent(value(e, field),
+                k -> new ArrayList<>()).add(e);
         }
-
-        return new ArrayList<>(grouped.values());
+        return new ArrayList<>(groups.values());
     }
 
-    // Apply enabled rules in their user-selected order.
-    // Sorting affects each existing group; grouping can split groups further.
     static List<List<Email>> processRules(
             List<Email> emails, List<Rule> rules) {
-
         List<List<Email>> groups = new ArrayList<>();
         groups.add(new ArrayList<>(emails));
 
-        List<Rule> orderedRules = new ArrayList<>();
+        rules.sort(Comparator.comparingInt(r -> r.order));
 
         for (Rule rule : rules) {
-            if (rule.enabled) orderedRules.add(rule);
-        }
-
-        orderedRules.sort(Comparator.comparingInt(r -> r.order));
-
-        for (Rule rule : orderedRules) {
-            List<List<Email>> nextGroups = new ArrayList<>();
+            List<List<Email>> next = new ArrayList<>();
 
             for (List<Email> group : groups) {
                 if (rule.operation == Operation.SORT) {
                     sortEmails(group, rule);
-                    nextGroups.add(group);
+                    next.add(group);
                 } else {
-                    nextGroups.addAll(groupEmails(group, rule.field));
+                    next.addAll(groupEmails(group, rule.field));
                 }
             }
-
-            groups = nextGroups;
+            groups = next;
         }
-
         return groups;
     }
 
-    // Adds a new message and flags important linked updates.
-    static void addOrUpdateEmail(
-            List<Email> emails,
-            Email incoming,
-            LocalDateTime now) {
+    static void printRules(List<Rule> rules) {
+        System.out.println("\nACTIVE RULES (highest priority first)");
+        System.out.println("--------------------------------------");
 
-        if (incoming.relatedMessageId != null) {
-            for (Email existing : emails) {
-                if (existing.id.equals(incoming.relatedMessageId)) {
-                    incoming.isUpdate = true;
-
-                    if (incoming.updateType != UpdateType.NONE) {
-                        incoming.isUrgent = true;
-                    }
-
-                    break;
-                }
-            }
+        for (int i = 0; i < rules.size(); i++) {
+            Rule r = rules.get(i);
+            System.out.println((i + 1) + ". " + r.name);
         }
-
-        incoming.messageScore = calculateScore(incoming, now);
-        emails.add(incoming);
     }
 
     static void printEmail(Email e) {
-        System.out.println("  Subject:       " + e.subject);
-        System.out.println("  Sender:        " + e.sender);
-        System.out.println("  Platform:      " + e.platform);
-        System.out.println("  Category:      " + e.category);
-        System.out.println("  Module:        " + e.module);
-        System.out.println("  Sent:          " + e.sentDate.format(DATE_FORMAT));
+        System.out.println("[" + priorityLabel(e) +
+            " | Importance: " + e.score + "/20] " + e.subject);
 
-        System.out.println("  Due date:      " +
-            (e.dueDate == null ? "Not specified"
-                : e.dueDate.format(DATE_FORMAT)));
+        System.out.println("  From: " + e.sender +
+            "  |  Source: " + e.platform);
+        System.out.println("  Category: " + e.category +
+            "  |  Module/group: " + e.module);
+        System.out.println("  Sent: " + e.sentDate.format(DATE));
 
-        System.out.println("  Urgent:        " + e.isUrgent);
-        System.out.println("  Reply:         " + e.isReply);
-        System.out.println("  Is update:     " + e.isUpdate);
-        System.out.println("  Update type:   " + e.updateType);
+        if (e.dueDate != null) {
+            System.out.println("  Deadline: " + e.dueDate.format(DATE));
+        }
 
-        System.out.println("  Related email: " +
-            (e.relatedMessageId == null ? "None" : e.relatedMessageId));
+        System.out.println("  Status: " + statusLabel(e));
+        System.out.println("  Message: " + updateLabel(e));
 
-        System.out.println("  Graded:        " +
-            (e.graded == null ? "Unknown" : e.graded));
+        /*if (e.relatedId != null) {
+            System.out.println("  Related to message: " + e.relatedId);
+        }
+        */
+        if (e.graded) {
+            System.out.println("  Grade/feedback: Available" +
+                (e.points == null ? "" : " (" + e.points + " points)"));
+        }
 
-        System.out.println("  Points:        " +
-            (e.points == null ? "Not specified" : e.points));
-
-        System.out.println("  Action:        " + e.actionStatus);
-        System.out.println("  Score:         " + e.messageScore);
-        System.out.println("  Preview:       " + e.body);
-        System.out.println("  ID:            " + e.id);
+        System.out.println("  Preview: " + e.body);
         System.out.println();
     }
 
-    static Email createEmail(
-            String id, String sender, String platform,
-            String subject, String body, LocalDateTime sent,
-            Category category, String module, String action) {
+    static Email make(String id, String sender, String platform,
+            String subject, String body, int hoursAgo,
+            Category category, String module, String status) {
+        return new Email(id, sender, platform, subject, body,
+            NOW.minusHours(hoursAgo), category, module, status);
+    }
 
-        Email e = new Email(
-            id, sender, platform, subject, body, sent, category
-        );
+    static List<Email> createTestData() {
+        List<Email> emails = new ArrayList<>();
 
-        e.module = module;
-        e.actionStatus = action;
-        return e;
+        Email e;
+
+        e = make("E001", "lecturer@uni.ac.uk", "Outlook",
+            "Programming coursework deadline",
+            "Submit the Java coursework on Canvas.",
+            72, Category.COURSEWORK, "Computer Science", "Needs action");
+        e.dueDate = NOW.plusDays(3);
+        e.points = 40;
+        emails.add(e);
+
+        e = make("E002", "lecturer@uni.ac.uk", "Outlook",
+            "UPDATE: Coursework deadline changed",
+            "The submission deadline has moved to tomorrow.",
+            1, Category.COURSEWORK, "Computer Science", "Needs action");
+        e.dueDate = NOW.plusDays(1);
+        e.isUpdate = true;
+        e.isReply = true;
+        e.updateType = UpdateType.DEADLINE_CHANGE;
+        e.relatedId = "E001";
+        emails.add(e);
+
+        e = make("E003", "cs-lectures@uni.ac.uk", "Canvas",
+            "Lecture moved to Room 205",
+            "Friday's lecture will take place in Room 205.",
+            5, Category.LECTURES, "Computer Science", "Informational");
+        e.isUpdate = true;
+        e.updateType = UpdateType.LOCATION_CHANGE;
+        e.manuallyUrgent = true;
+        emails.add(e);
+
+        e = make("E004", "student-services@uni.ac.uk", "Outlook",
+            "Action required: confirm student details",
+            "Please confirm your contact information.",
+            24, Category.UNIVERSITY_ADMIN, "University Admin", "Needs action");
+        e.manuallyUrgent = true;
+        emails.add(e);
+
+        e = make("E005", "exams@uni.ac.uk", "Canvas",
+            "Semester exam timetable published",
+            "Check the timetable and report any clashes.",
+            8, Category.EXAMS, "Mathematics", "Needs action");
+        e.dueDate = NOW.plusDays(7);
+        emails.add(e);
+
+        e = make("E006", "lecturer@uni.ac.uk", "Canvas",
+            "Coursework grade released",
+            "Your coursework mark and feedback are available.",
+            2, Category.COURSEWORK, "Computer Science", "Review");
+        e.graded = true;
+        e.points = 34;
+        e.isUpdate = true;
+        e.updateType = UpdateType.GRADE_CHANGE;
+        e.relatedId = "E001";
+        emails.add(e);
+
+        e = make("E007", "computing-society@uni.ac.uk", "Outlook",
+            "Hackathon this Saturday",
+            "Register for the student hackathon.",
+            6, Category.SOCIETIES_EVENTS, "Computing Society", "Needs action");
+        e.dueDate = NOW.plusDays(2);
+        emails.add(e);
+
+        e = make("E008", "library@uni.ac.uk", "Outlook",
+            "Library opening hours this weekend",
+            "The library will close earlier on Sunday.",
+            48, Category.GENERAL, "General", "Informational");
+        emails.add(e);
+
+        e = make("E009", "classmate@uni.ac.uk", "Outlook",
+            "Re: Coursework question",
+            "I think the lab examples will help.",
+            3, Category.COURSEWORK, "Computer Science", "Informational");
+        e.isReply = true;
+        emails.add(e);
+
+        e = make("E010", "computing-society@uni.ac.uk", "Outlook",
+            "UPDATE: Workshop cancelled",
+            "The workshop planned for Friday is cancelled.",
+            0, Category.SOCIETIES_EVENTS, "Computing Society", "Informational");
+        e.isUpdate = true;
+        e.updateType = UpdateType.CANCELLATION;
+        e.manuallyUrgent = true;
+        e.relatedId = "E007";
+        emails.add(e);
+
+        e = make("E011", "news@uni.ac.uk", "Outlook",
+            "Weekly newsletter",
+            "Optional events and news. No action needed.",
+            12, Category.GENERAL, "General", "Informational");
+        emails.add(e);
+
+        e = make("E012", "offers@example.com", "Outlook",
+            "Promotional offer",
+            "Advertisement: limited-time sale. Unsubscribe any time.",
+            10, Category.GENERAL, "General", "Informational");
+        emails.add(e);
+
+        return emails;
+    }
+
+    static List<Rule> chooseRules(Scanner input) {
+        System.out.println("\nHow would you like to organise your messages?");
+        System.out.println("1. Group by category, most important first");
+        System.out.println("2. Show most important messages first");
+        System.out.println("3. Show newest messages first");
+        System.out.println("4. Show updates first, then most important");
+        System.out.print("Choose 1-4: ");
+
+        String choice = input.nextLine().trim();
+        List<Rule> rules = new ArrayList<>();
+
+        switch (choice) {
+            case "2":
+                rules.add(new Rule("Highest importance first",
+                    Operation.SORT, Field.IMPORTANCE, false, 1));
+                break;
+
+            case "3":
+                rules.add(new Rule("Newest messages first",
+                    Operation.SORT, Field.SENT_DATE, false, 1));
+                break;
+
+            case "4":
+                rules.add(new Rule("Updates before original messages",
+                    Operation.SORT, Field.UPDATE_FIRST, false, 1));
+                rules.add(new Rule("Highest importance first",
+                    Operation.SORT, Field.IMPORTANCE, false, 2));
+                break;
+
+            case "1":
+            default:
+                rules.add(new Rule("Group by category",
+                    Operation.GROUP, Field.CATEGORY, true, 1));
+                rules.add(new Rule("Highest importance first within each group",
+                    Operation.SORT, Field.IMPORTANCE, false, 2));
+                break;
+        }
+
+        return rules;
     }
 
     public static void main(String[] args) {
-        // Fixed reference time makes the demo repeatable.
-        LocalDateTime now = LocalDateTime.of(2026, 10, 14, 12, 0);
+        Scanner input = new Scanner(System.in);
+        List<Email> emails = createTestData();
 
-        List<Email> emails = new ArrayList<>();
-
-        // 1. Coursework deadline announcement.
-        Email e1 = createEmail(
-            "E001", "lecturer@uni.ac.uk", "Outlook",
-            "Programming coursework deadline",
-            "Submit the Java coursework through Canvas.",
-            now.minusDays(3), Category.COURSEWORK,
-            "Computer Science", "Needs action"
-        );
-        e1.dueDate = now.plusDays(3);
-        e1.points = 40;
-        emails.add(e1);
-
-        // 2. An update to the original coursework email.
-        Email e2 = createEmail(
-            "E002", "lecturer@uni.ac.uk", "Outlook",
-            "UPDATE: Programming coursework deadline changed",
-            "The deadline has moved forward to tomorrow.",
-            now.minusHours(1), Category.COURSEWORK,
-            "Computer Science", "Needs action"
-        );
-        e2.dueDate = now.plusDays(1);
-        e2.points = 40;
-        e2.isReply = true;
-        e2.isUpdate = true;
-        e2.updateType = UpdateType.DEADLINE_CHANGE;
-        e2.relatedMessageId = "E001";
-        emails.add(e2);
-
-        // 3. Lecture announcement.
-        Email e3 = createEmail(
-            "E003", "cs-lectures@uni.ac.uk", "Canvas",
-            "Lecture moved to Room 205",
-            "Friday's lecture will take place in Room 205.",
-            now.minusHours(5), Category.LECTURES,
-            "Computer Science", "Informational"
-        );
-        e3.updateType = UpdateType.LOCATION_CHANGE;
-        e3.isUpdate = true;
-        e3.isUrgent = true;
-        emails.add(e3);
-
-        // 4. University administration.
-        Email e4 = createEmail(
-            "E004", "student-services@uni.ac.uk", "Outlook",
-            "Action required: confirm your student details",
-            "Please confirm your contact information.",
-            now.minusDays(1), Category.UNIVERSITY_ADMIN,
-            "University Admin", "Needs action"
-        );
-        e4.isUrgent = true;
-        emails.add(e4);
-
-        // 5. Exam timetable.
-        Email e5 = createEmail(
-            "E005", "exams@uni.ac.uk", "Canvas",
-            "Semester exam timetable published",
-            "Check the timetable and report any clashes.",
-            now.minusHours(8), Category.EXAMS,
-            "Mathematics", "Needs action"
-        );
-        e5.dueDate = now.plusDays(7);
-        emails.add(e5);
-
-        // 6. Grade and feedback.
-        Email e6 = createEmail(
-            "E006", "lecturer@uni.ac.uk", "Canvas",
-            "Coursework grade released",
-            "Your coursework mark and feedback are available.",
-            now.minusHours(2), Category.COURSEWORK,
-            "Computer Science", "Review"
-        );
-        e6.graded = true;
-        e6.points = 34;
-        e6.updateType = UpdateType.GRADE_CHANGE;
-        e6.isUpdate = true;
-        e6.relatedMessageId = "E001";
-        emails.add(e6);
-
-        // 7. Society event.
-        Email e7 = createEmail(
-            "E007", "computing-society@uni.ac.uk", "Outlook",
-            "Hackathon this Saturday",
-            "Register for the student hackathon.",
-            now.minusHours(6), Category.SOCIETIES_EVENTS,
-            "Computing Society", "Needs action"
-        );
-        e7.dueDate = now.plusDays(2);
-        emails.add(e7);
-
-        // 8. General university announcement.
-        Email e8 = createEmail(
-            "E008", "library@uni.ac.uk", "Outlook",
-            "Library opening hours this weekend",
-            "The library will close earlier on Sunday.",
-            now.minusDays(2), Category.GENERAL,
-            "General", "Informational"
-        );
-        emails.add(e8);
-
-        // 9. A normal reply, not an update.
-        Email e9 = createEmail(
-            "E009", "classmate@uni.ac.uk", "Outlook",
-            "Re: Coursework question",
-            "I think the lab examples will help.",
-            now.minusHours(3), Category.COURSEWORK,
-            "Computer Science", "Informational"
-        );
-        e9.isReply = true;
-        emails.add(e9);
-
-        // 10. Event cancellation.
-        Email e10 = createEmail(
-            "E010", "computing-society@uni.ac.uk", "Outlook",
-            "UPDATE: Workshop cancelled",
-            "The workshop planned for Friday is cancelled.",
-            now.minusMinutes(30), Category.SOCIETIES_EVENTS,
-            "Computing Society", "Informational"
-        );
-        e10.isUpdate = true;
-        e10.updateType = UpdateType.CANCELLATION;
-        e10.isUrgent = true;
-        e10.relatedMessageId = "E007";
-        emails.add(e10);
-
-        // Calculate all scores before sorting.
-        for (Email email : emails) {
-            email.messageScore = calculateScore(email, now);
+        for (Email e : emails) {
+            e.score = calculateScore(e);
+            e.priorityLabel = priorityLabel(e);
         }
 
-        // Example of user-configurable rules.
-        List<Rule> rules = new ArrayList<>();
+        List<Rule> rules = chooseRules(input);
+        printRules(rules);
 
-        rules.add(new Rule(
-            "Group by category", Operation.GROUP,
-            Field.CATEGORY, true, true, 1
-        ));
-
-        rules.add(new Rule(
-            "Most important first", Operation.SORT,
-            Field.MESSAGE_SCORE, false, true, 2
-        ));
-
-        // Run the processing engine.
-        List<List<Email>> results = processRules(emails, rules);
-
-        System.out.println("==========================================");
-        System.out.println("          TRACKR EMAIL DASHBOARD");
-        System.out.println("==========================================");
-        System.out.println("Total messages: " + emails.size());
-        System.out.println("Active rules:   " + rules.size());
+        System.out.println("\nTRACKR — YOUR ACADEMIC INBOX");
+        System.out.println("Messages found: " + emails.size());
+        System.out.println("Urgent messages: " +
+            emails.stream().filter(Main::isUrgent).count());
         System.out.println();
 
-        int groupNumber = 1;
+        if (rules.stream().anyMatch(r -> r.operation == Operation.GROUP)) {
+            List<List<Email>> groups = processRules(emails, rules);
+            int number = 1;
 
-        for (List<Email> group : results) {
-            if (group.isEmpty()) continue;
-
-            Category category = group.get(0).category;
-
-            System.out.println("------------------------------------------");
-            System.out.println("GROUP " + groupNumber + ": " + category);
-            System.out.println("Messages in group: " + group.size());
-            System.out.println("------------------------------------------");
-
-            for (Email email : group) {
-                printEmail(email);
+            for (List<Email> group : groups) {
+                if (group.isEmpty()) continue;
+                System.out.println("========== GROUP " + number +
+                    ": " + group.get(0).category + " ==========");
+                for (Email e : group) printEmail(e);
+                number++;
             }
-
-            groupNumber++;
+        } else {
+            List<List<Email>> result = processRules(emails, rules);
+            for (List<Email> group : result) {
+                for (Email e : group) printEmail(e);
+            }
         }
 
-        System.out.println("==========================================");
-        System.out.println("              END OF TRACKR");
-        System.out.println("==========================================");
+        System.out.println("Note: Importance scores are estimates, not facts.");
+        System.out.println("Low importance does not automatically mean spam.");
+        input.close();
     }
 }
